@@ -9,7 +9,7 @@ const JOYSTICK_RADIUS := 112.0
 var game_ref: Node
 var gravity := 18.0
 var yaw := 0.0
-var pitch := -0.20
+var pitch := -0.14
 var move_touch_id := -1
 var look_touch_id := -1
 var move_origin := Vector2.ZERO
@@ -57,15 +57,15 @@ func _build_camera() -> void:
     add_child(camera_pivot)
     spring_arm = SpringArm3D.new()
     spring_arm.name = "SpringArm"
-    spring_arm.spring_length = 4.8
+    spring_arm.spring_length = 3.85
     spring_arm.margin = 0.20
     spring_arm.add_excluded_object(get_rid())
     camera_pivot.add_child(spring_arm)
     camera = Camera3D.new()
     camera.name = "ThirdPersonCamera"
     camera.current = true
-    camera.fov = 66.0
-    camera.position = Vector3(0.35,0.12,0)
+    camera.fov = 61.0
+    camera.position = Vector3(0.30,0.02,0)
     spring_arm.add_child(camera)
 
 func _build_model() -> void:
@@ -296,6 +296,10 @@ func _animate_model(delta: float, speed: float) -> void:
 
 func play_attack(heavy: bool = false) -> void:
     attack_anim_time = 0.48 if heavy else 0.36
+    if is_on_floor():
+        var forward := -model_root.global_transform.basis.z.normalized()
+        velocity.x += forward.x * (1.2 if heavy else 0.75)
+        velocity.z += forward.z * (1.2 if heavy else 0.75)
 
 func play_spin_attack() -> void:
     spin_anim_time = 0.55
@@ -342,19 +346,19 @@ func cancel_touches() -> void:
 
 func _inside_attack_button(pos: Vector2,screen: Vector2) -> bool:
     var s := _ui_scale(screen)
-    return pos.distance_to(Vector2(screen.x-92.0*s,screen.y-112.0*s)) <= 67.0*s
+    return pos.distance_to(Vector2(screen.x-110.0*s,screen.y-116.0*s)) <= 78.0*s
 func _inside_skill1_button(pos: Vector2,screen: Vector2) -> bool:
     var s := _ui_scale(screen)
-    return pos.distance_to(Vector2(screen.x-225.0*s,screen.y-82.0*s)) <= 57.0*s
+    return pos.distance_to(Vector2(screen.x-238.0*s,screen.y-86.0*s)) <= 64.0*s
 func _inside_skill2_button(pos: Vector2,screen: Vector2) -> bool:
     var s := _ui_scale(screen)
-    return pos.distance_to(Vector2(screen.x-215.0*s,screen.y-205.0*s)) <= 57.0*s
+    return pos.distance_to(Vector2(screen.x-226.0*s,screen.y-214.0*s)) <= 64.0*s
 func _inside_jump_button(pos: Vector2,screen: Vector2) -> bool:
     var s := _ui_scale(screen)
-    return pos.distance_to(Vector2(screen.x-92.0*s,screen.y-255.0*s)) <= 52.0*s
+    return pos.distance_to(Vector2(screen.x-110.0*s,screen.y-250.0*s)) <= 56.0*s
 func _inside_interact_button(pos: Vector2,screen: Vector2) -> bool:
     var s := _ui_scale(screen)
-    return pos.distance_to(Vector2(screen.x-92.0*s,screen.y-370.0*s)) <= 55.0*s
+    return pos.distance_to(Vector2(screen.x-110.0*s,screen.y-360.0*s)) <= 58.0*s
 func _ui_scale(screen: Vector2) -> float:
     return clampf(screen.y/720.0,0.85,1.55)
 func _material(color: Color,roughness: float) -> StandardMaterial3D:

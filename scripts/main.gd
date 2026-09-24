@@ -2,7 +2,8 @@ extends Node3D
 
 const QUEST_WOLVES := 0
 const QUEST_BANDITS := 1
-const QUEST_DONE := 2
+const QUEST_CAPTAIN := 2
+const QUEST_DONE := 3
 
 var player: CharacterBody3D
 var hud: Control
@@ -11,6 +12,7 @@ var quest_label: Label3D
 var enemies: Array[Node] = []
 var wolves: Array[Node] = []
 var bandits: Array[Node] = []
+var captain: Node = null
 var current_target: Node = null
 
 var quest_id := QUEST_WOLVES
@@ -36,6 +38,7 @@ var toast_text := ""
 var toast_time := 0.0
 var loot_text := ""
 var loot_time := 0.0
+var autosave_timer := 6.0
 
 func _ready() -> void:
     randomize()
@@ -46,12 +49,15 @@ func _ready() -> void:
     _build_village()
     _build_forest_and_ruins()
     _build_bandit_camp_and_mine()
+    _scatter_world_detail()
     _build_npc()
     _spawn_player()
     _build_wolves()
     _build_bandits()
+    _build_captain()
     _build_hud()
-    show_toast("Ravenfall · Grenzland von Eldoria", 3.0)
+    _load_game()
+    show_toast("Ravenfall · Kapitel I", 3.0)
 
 func _process(delta: float) -> void:
     attack_cooldown = maxf(0.0, attack_cooldown - delta)
@@ -59,6 +65,10 @@ func _process(delta: float) -> void:
     skill2_cd = maxf(0.0, skill2_cd - delta)
     toast_time = maxf(0.0, toast_time - delta)
     loot_time = maxf(0.0, loot_time - delta)
+    autosave_timer -= delta
+    if autosave_timer <= 0.0:
+        autosave_timer = 6.0
+        save_game()
     if current_target != null:
         if not is_instance_valid(current_target) or not current_target.is_alive_enemy():
             select_target(null)
@@ -79,7 +89,7 @@ func _setup_environment() -> void:
     sky.sky_material = sky_mat
     env.sky = sky
     env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-    env.ambient_light_energy = 0.78
+    env.ambient_light_energy = 0.68
     env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
     env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
     world_env.environment = env
@@ -89,7 +99,7 @@ func _setup_environment() -> void:
     sun.name = "Sun"
     sun.rotation_degrees = Vector3(-52.0, -32.0, 0.0)
     sun.light_color = Color("fff0cf")
-    sun.light_energy = 1.45
+    sun.light_energy = 1.28
     sun.shadow_enabled = true
     sun.directional_shadow_max_distance = 70.0
     add_child(sun)
@@ -346,6 +356,42 @@ func _make_ruin(pos: Vector3) -> void:
     _add_box_mesh(root, Vector3(0.9, 2.7, 0.9), Vector3(2.1, 1.35, 0), Color("72766f"))
     _add_box_mesh(root, Vector3(5.0, 0.65, 0.8), Vector3(0, 3.5, 0), Color("6b7069"))
 
+func _scatter_world_detail() -> void:
+    # Cheap MultiMesh ground detail: much denser world without hundreds of nodes.
+    var grass_positions: Array[Vector3] = []
+    var flower_positions: Array[Vector3] = []
+    var rng := RandomNumberGenerator.new()
+    rng.seed = 4042026
+    for i in range(260):
+        var x := rng.randf_range(-47.0,47.0)
+        var z := rng.randf_range(-72.0,34.0)
+        if absf(x) < 7.0 and z > -62.0:
+            continue
+        if x > 8.0 and z < -68.0:
+            continue
+        grass_positions.append(Vector3(x,0.18,z))
+        if i % 11 == 0:
+            flower_positions.append(Vector3(x+0.35,0.22,z-0.25))
+    _make_multimesh_detail(grass_positions,Vector3(0.06,0.42,0.06),Color("4f9a45"))
+    _make_multimesh_detail(flower_positions,Vector3(0.08,0.30,0.08),Color("e3d36e"))
+
+func _make_multimesh_detail(positions: Array[Vector3], mesh_size: Vector3, color: Color) -> void:
+    if positions.is_empty():
+        return
+    var mesh := BoxMesh.new()
+    mesh.size = mesh_size
+    var mm := MultiMesh.new()
+    mm.transform_format = MultiMesh.TRANSFORM_3D
+    mm.instance_count = positions.size()
+    mm.mesh = mesh
+    for i in range(positions.size()):
+        var angle := float((i * 37) % 360) * PI / 180.0
+        mm.set_instance_transform(i,Transform3D(Basis(Vector3.UP,angle),positions[i]))
+    var inst := MultiMeshInstance3D.new()
+    inst.multimesh = mm
+    inst.material_override = _material(color,1.0)
+    add_child(inst)
+
 func _build_bandit_camp_and_mine() -> void:
     var camp := Node3D.new()
     camp.position = Vector3(17.0, 0.0, -78.0)
@@ -475,17 +521,32 @@ func _build_bandits() -> void:
         bandits.append(bandit)
         enemies.append(bandit)
 
+func _build_captain() -> void:
+    captain = CharacterBody3D.new()
+    captain.name = "Banditenhauptmann"
+    captain.position = Vector3(19.0,0.02,-91.0)
+    captain.set_script(load("res://scripts/captain.gd"))
+    add_child(captain)
+    captain.configure(player,self,captain.position)
+    enemies.append(captain)
+
 func _build_hud() -> void:
     var canvas := CanvasLayer.new()
     canvas.name = "HUD"
+    canvas.layer = 5
     add_child(canvas)
     hud = Control.new()
+    hud.name = "HUDRoot"
     hud.set_script(load("res://scripts/hud.gd"))
+    canvas.add_child(hud)
     hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    hud.visible = true
+    hud.process_mode = Node.PROCESS_MODE_ALWAYS
     hud.set("player", player)
     hud.set("game", self)
-    canvas.add_child(hud)
+    if hud.has_method("queue_redraw"):
+        hud.queue_redraw()
 
 func try_select_from_screen(camera: Camera3D, screen_pos: Vector2) -> bool:
     if camera == null:
@@ -514,13 +575,18 @@ func select_target(target: Node) -> void:
 func perform_player_attack() -> void:
     if not _can_attack() or attack_cooldown > 0.0:
         return
-    var target := _get_attack_target(5.0)
+    var target := _get_attack_target(7.0)
     if target == null:
         show_toast("Kein Gegner in Reichweite", 1.2)
         return
-    if player.global_position.distance_to(target.global_position) > 4.2:
-        show_toast("Ziel ist zu weit entfernt", 1.1)
-        return
+    if player.global_position.distance_to(target.global_position) > 5.2:
+        var closer := _nearest_alive_enemy(5.2)
+        if closer != null:
+            target = closer
+            select_target(target)
+        else:
+            show_toast("Ziel ist zu weit entfernt", 1.1)
+            return
     attack_cooldown = 0.66
     player.face_world_position(target.global_position)
     player.play_attack(false)
@@ -537,8 +603,8 @@ func perform_skill_1() -> void:
     if rage < 20:
         show_toast("Nicht genug Wut", 1.0)
         return
-    var target := _get_attack_target(5.2)
-    if target == null or player.global_position.distance_to(target.global_position) > 4.4:
+    var target := _get_attack_target(6.0)
+    if target == null or player.global_position.distance_to(target.global_position) > 5.0:
         show_toast("Kraftschlag: kein Ziel in Reichweite", 1.1)
         return
     rage -= 20
@@ -564,7 +630,7 @@ func perform_skill_2() -> void:
     player.play_spin_attack()
     for enemy in enemies:
         if enemy != null and is_instance_valid(enemy) and enemy.is_alive_enemy():
-            if player.global_position.distance_to(enemy.global_position) <= 4.4:
+            if player.global_position.distance_to(enemy.global_position) <= 5.0:
                 hit_any = true
                 enemy.take_damage(randi_range(24, 31) + get_weapon_power(), false)
     if not hit_any:
@@ -643,15 +709,27 @@ func _turn_in_current_quest() -> void:
         quest_stage = 0
         quest_progress = 0
         quest_panel_open = false
+        save_game()
         show_toast("Auftrag erfüllt · neuer Auftrag verfügbar", 2.8)
     elif quest_id == QUEST_BANDITS:
         gold += 55
         _add_xp(90)
         add_item({"name":"Wächterklinge", "power":8, "rarity":"Selten", "type":"Waffe"}, true)
+        quest_id = QUEST_CAPTAIN
+        quest_stage = 0
+        quest_progress = 0
+        quest_panel_open = false
+        save_game()
+        show_toast("Das Lager fällt · Arlen hat noch einen Auftrag", 2.8)
+    elif quest_id == QUEST_CAPTAIN:
+        gold += 95
+        _add_xp(145)
+        add_item({"name":"Klinge des Grenzwächters", "power":13, "rarity":"Episch", "type":"Waffe"}, true)
         quest_id = QUEST_DONE
         quest_stage = 3
         quest_panel_open = false
-        show_toast("Ravenfall gesichert · +90 EP · +55 Gold", 3.0)
+        save_game()
+        show_toast("KAPITEL I ABGESCHLOSSEN · Ravenfall ist sicher", 3.3)
 
 func get_quest_panel_rect() -> Rect2:
     var screen := get_viewport().get_visible_rect().size
@@ -707,6 +785,8 @@ func get_quest_title() -> String:
         return "Wölfe vor den Toren"
     if quest_id == QUEST_BANDITS:
         return "Die Räuber vom Ostlager"
+    if quest_id == QUEST_CAPTAIN:
+        return "Der Hauptmann der Räuber"
     return "Ravenfall gesichert"
 
 func get_quest_body_lines() -> PackedStringArray:
@@ -721,8 +801,14 @@ func get_quest_body_lines() -> PackedStringArray:
             return PackedStringArray(["Arlen: Hinter den Wölfen stecken Räuber.","Besiege 4 Banditen am Lager vor der Alten Mine.","Belohnung: 90 EP, 55 Gold und eine seltene Waffe."])
         if quest_stage == 1:
             return PackedStringArray(["Folge der Straße weiter nach Süden und Osten.","Fortschritt: %d / 4 Banditen" % quest_progress,"Das Lager liegt gegenüber der Alten Mine."])
-        return PackedStringArray(["Arlen: Das Lager ist gefallen.","Ravenfall hat wieder Luft zum Atmen.","Nimm diese Waffe. Du wirst sie brauchen."])
-    return PackedStringArray(["Arlen: Für heute hast du genug getan.","Die Alte Mine bleibt versiegelt.","Das nächste Kapitel führt unter die Erde."])
+        return PackedStringArray(["Arlen: Das Lager ist gefallen.","Ihr Anführer hält sich hinter den Zelten auf.","Wir müssen ihn ausschalten."])
+    if quest_id == QUEST_CAPTAIN:
+        if quest_stage == 0:
+            return PackedStringArray(["Arlen: Jetzt fehlt nur noch ihr Hauptmann.","Besiege den Banditenhauptmann hinter dem Ostlager.","Belohnung: 145 EP, 95 Gold und eine epische Klinge."])
+        if quest_stage == 1:
+            return PackedStringArray(["Der Hauptmann steht südlich hinter dem Lager.","Elitegegner: 0 / 1 besiegt","Bereite dich auf einen härteren Kampf vor."])
+        return PackedStringArray(["Arlen: Der Hauptmann ist gefallen.","Ravenfall ist vorerst sicher.","Kapitel I ist abgeschlossen."])
+    return PackedStringArray(["Arlen: Ravenfall steht wieder sicher.","Die Alte Mine bleibt vorerst versiegelt.","Kapitel II führt uns unter die Erde."])
 
 func get_quest_tracker_text() -> String:
     if quest_id == QUEST_DONE:
@@ -733,7 +819,9 @@ func get_quest_tracker_text() -> String:
         return "Kehre zu Hauptmann Arlen zurück"
     if quest_id == QUEST_WOLVES:
         return "Wölfe besiegen: %d / 3" % quest_progress
-    return "Banditen besiegen: %d / 4" % quest_progress
+    if quest_id == QUEST_BANDITS:
+        return "Banditen besiegen: %d / 4" % quest_progress
+    return "Banditenhauptmann besiegen: %d / 1" % quest_progress
 
 func on_enemy_defeated(enemy: Node, enemy_type: String) -> void:
     if current_target == enemy:
@@ -765,6 +853,18 @@ func on_enemy_defeated(enemy: Node, enemy_type: String) -> void:
                 show_toast("Banditenlager gebrochen · zurück zu Arlen", 2.7)
                 return
         show_loot("+32 EP · +%d Gold · Beute" % loot_gold)
+
+    elif enemy_type == "captain":
+        var loot_gold := randi_range(18,28)
+        gold += loot_gold
+        _add_xp(65)
+        add_item({"name":"Siegelring des Hauptmanns", "power":3, "rarity":"Selten", "type":"Schmuck"}, false)
+        if quest_id == QUEST_CAPTAIN and quest_stage == 1:
+            quest_progress = 1
+            quest_stage = 2
+            show_toast("ELITE BESIEGT · zurück zu Arlen", 2.8)
+        show_loot("+65 EP · +%d Gold · Elitebeute" % loot_gold)
+        save_game()
 
 func add_item(item: Dictionary, auto_equip: bool = false) -> void:
     inventory.append(item.duplicate(true))
@@ -823,6 +923,54 @@ func spawn_damage_number(world_pos: Vector3, amount: int, critical: bool = false
     tween.tween_property(label, "modulate:a", 0.0, 0.75)
     tween.set_parallel(false)
     tween.tween_callback(label.queue_free)
+
+func save_game() -> void:
+    if player == null:
+        return
+    var data := {
+        "version":4,
+        "level":level,"xp":xp,"gold":gold,"pelts":pelts,"rage":rage,
+        "quest_id":quest_id,"quest_stage":quest_stage,"quest_progress":quest_progress,
+        "inventory":inventory,"equipped_weapon":equipped_weapon,
+        "player_pos":[player.global_position.x,player.global_position.y,player.global_position.z]
+    }
+    var file := FileAccess.open("user://eldoria_save_v04.json",FileAccess.WRITE)
+    if file != null:
+        file.store_string(JSON.stringify(data))
+
+func _load_game() -> void:
+    if not FileAccess.file_exists("user://eldoria_save_v04.json"):
+        return
+    var file := FileAccess.open("user://eldoria_save_v04.json",FileAccess.READ)
+    if file == null:
+        return
+    var parsed = JSON.parse_string(file.get_as_text())
+    if typeof(parsed) != TYPE_DICTIONARY:
+        return
+    level = int(parsed.get("level",1))
+    xp = int(parsed.get("xp",0))
+    gold = int(parsed.get("gold",0))
+    pelts = int(parsed.get("pelts",0))
+    rage = int(parsed.get("rage",0))
+    quest_id = int(parsed.get("quest_id",QUEST_WOLVES))
+    quest_stage = int(parsed.get("quest_stage",0))
+    quest_progress = int(parsed.get("quest_progress",0))
+    var inv = parsed.get("inventory",[])
+    inventory.clear()
+    if inv is Array:
+        for entry in inv:
+            if entry is Dictionary:
+                inventory.append(entry)
+    var weapon = parsed.get("equipped_weapon",equipped_weapon)
+    if weapon is Dictionary:
+        equipped_weapon = weapon
+    player.set_max_health(100 + (level - 1) * 14,true)
+    var pos = parsed.get("player_pos",[])
+    if pos is Array and pos.size() == 3:
+        var saved_pos := Vector3(float(pos[0]),float(pos[1]),float(pos[2]))
+        if saved_pos.length() < 180.0:
+            player.global_position = saved_pos
+    _update_quest_marker()
 
 func get_rarity_color(rarity: String) -> Color:
     match rarity:
