@@ -25,7 +25,7 @@ var toast_time := 0.0
 func _ready() -> void:
     randomize()
     DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
-    DisplayServer.screen_set_orientation(DisplayServer.SCREEN_SENSOR_LANDSCAPE)
+    DisplayServer.screen_set_orientation(DisplayServer.SCREEN_LANDSCAPE)
     _setup_environment()
     _build_ground()
     _build_village()
