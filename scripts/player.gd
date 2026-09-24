@@ -191,6 +191,8 @@ func _unhandled_input(event: InputEvent) -> void:
                 game_ref.perform_skill_1()
             elif _inside_skill2_button(event.position,screen):
                 game_ref.perform_skill_2()
+            elif _inside_potion_button(event.position,screen):
+                game_ref.use_potion()
             elif _inside_jump_button(event.position,screen):
                 jump_requested = true
             elif _inside_interact_button(event.position,screen):
@@ -230,6 +232,7 @@ func _unhandled_input(event: InputEvent) -> void:
             KEY_F: game_ref.perform_player_attack()
             KEY_1: game_ref.perform_skill_1()
             KEY_2: game_ref.perform_skill_2()
+            KEY_3: game_ref.use_potion()
             KEY_Q: game_ref.try_interact()
             KEY_I: game_ref.toggle_inventory()
 
@@ -314,12 +317,20 @@ func face_world_position(world_pos: Vector3) -> void:
 func take_damage(amount: int) -> void:
     if dead:
         return
-    health = maxi(0,health-amount)
+    var final_damage := amount
+    if game_ref != null and game_ref.has_method("get_armor_value"):
+        final_damage = maxi(1,amount-int(game_ref.get_armor_value()))
+    health = maxi(0,health-final_damage)
     hit_anim_time = 0.18
     if game_ref != null:
-        game_ref.spawn_damage_number(global_position+Vector3(0,2.2,0),amount,false,true)
+        game_ref.spawn_damage_number(global_position+Vector3(0,2.2,0),final_damage,false,true)
     if health <= 0:
         _die()
+
+func heal(amount: int) -> void:
+    if dead:
+        return
+    health = mini(max_health,health+amount)
 
 func _die() -> void:
     dead = true
@@ -359,6 +370,9 @@ func _inside_jump_button(pos: Vector2,screen: Vector2) -> bool:
 func _inside_interact_button(pos: Vector2,screen: Vector2) -> bool:
     var s := _ui_scale(screen)
     return pos.distance_to(Vector2(screen.x-110.0*s,screen.y-360.0*s)) <= 58.0*s
+func _inside_potion_button(pos: Vector2,screen: Vector2) -> bool:
+    var s := _ui_scale(screen)
+    return pos.distance_to(Vector2(screen.x-355.0*s,screen.y-212.0*s)) <= 58.0*s
 func _ui_scale(screen: Vector2) -> float:
     return clampf(screen.y/720.0,0.85,1.55)
 func _material(color: Color,roughness: float) -> StandardMaterial3D:

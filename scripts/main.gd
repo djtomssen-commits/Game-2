@@ -3,7 +3,13 @@ extends Node3D
 const QUEST_WOLVES := 0
 const QUEST_BANDITS := 1
 const QUEST_CAPTAIN := 2
-const QUEST_DONE := 3
+const QUEST_MINE_SPIDERS := 3
+const QUEST_MINE_BOSS := 4
+const QUEST_DONE := 5
+
+const SURFACE_MINE_ENTRANCE := Vector3(-17.0, 0.0, -80.0)
+const MINE_EXIT := Vector3(220.0, 0.0, 31.0)
+const MINE_CENTER := Vector3(220.0, 0.0, 0.0)
 
 var player: CharacterBody3D
 var hud: Control
@@ -13,6 +19,8 @@ var enemies: Array[Node] = []
 var wolves: Array[Node] = []
 var bandits: Array[Node] = []
 var captain: Node = null
+var spiders: Array[Node] = []
+var mine_boss: Node = null
 var current_target: Node = null
 
 var quest_id := QUEST_WOLVES
@@ -27,9 +35,13 @@ var gold := 0
 var pelts := 0
 var rage := 0
 var max_rage := 100
+var potions := 3
+var potion_cd := 0.0
 
 var inventory: Array[Dictionary] = []
 var equipped_weapon: Dictionary = {"name":"Rekrutenschwert", "power":0, "rarity":"Gewöhnlich", "type":"Waffe"}
+var equipped_armor: Dictionary = {"name":"Rekrutenwams", "armor":0, "rarity":"Gewöhnlich", "type":"Rüstung"}
+var equipped_charm: Dictionary = {"name":"Kein Talisman", "power":0, "rarity":"Gewöhnlich", "type":"Schmuck"}
 
 var attack_cooldown := 0.0
 var skill1_cd := 0.0
@@ -49,20 +61,23 @@ func _ready() -> void:
     _build_village()
     _build_forest_and_ruins()
     _build_bandit_camp_and_mine()
+    _build_mine_zone()
     _scatter_world_detail()
     _build_npc()
     _spawn_player()
     _build_wolves()
     _build_bandits()
     _build_captain()
+    _build_mine_enemies()
     _build_hud()
     _load_game()
-    show_toast("Ravenfall · Kapitel I", 3.0)
+    show_toast("Ravenfall · Kapitel II", 3.0)
 
 func _process(delta: float) -> void:
     attack_cooldown = maxf(0.0, attack_cooldown - delta)
     skill1_cd = maxf(0.0, skill1_cd - delta)
     skill2_cd = maxf(0.0, skill2_cd - delta)
+    potion_cd = maxf(0.0, potion_cd - delta)
     toast_time = maxf(0.0, toast_time - delta)
     loot_time = maxf(0.0, loot_time - delta)
     autosave_timer -= delta
@@ -419,6 +434,77 @@ func _build_bandit_camp_and_mine() -> void:
     mine_label.modulate = Color("d6c198")
     mine.add_child(mine_label)
 
+func _build_mine_zone() -> void:
+    # Kapitel-II-Zone liegt weit außerhalb der Oberwelt und wird über den Mineneingang betreten.
+    var mine_root := Node3D.new()
+    mine_root.name = "OldMineInterior"
+    add_child(mine_root)
+
+    _make_static_block(Vector3(220.0,-0.5,0.0),Vector3(82.0,1.0,72.0),Color("282b2e"))
+    _make_static_block(Vector3(179.0,4.0,0.0),Vector3(2.0,9.0,72.0),Color("343638"))
+    _make_static_block(Vector3(261.0,4.0,0.0),Vector3(2.0,9.0,72.0),Color("343638"))
+    _make_static_block(Vector3(220.0,4.0,-36.0),Vector3(84.0,9.0,2.0),Color("303235"))
+    _make_static_block(Vector3(220.0,8.5,0.0),Vector3(84.0,1.0,72.0),Color("202225"))
+
+    # Felsinseln und Kristalle brechen den langen Tunnel auf.
+    for rock_data in [
+        [Vector3(190,0,-4),3.0],[Vector3(249,0,-8),2.6],[Vector3(198,0,-24),2.2],
+        [Vector3(241,0,-27),3.2],[Vector3(208,0,15),2.0],[Vector3(235,0,12),2.4]
+    ]:
+        _make_rock(rock_data[0],rock_data[1])
+
+    for crystal_pos in [Vector3(187,0.4,10),Vector3(252,0.4,8),Vector3(204,0.4,-17),Vector3(238,0.4,-20),Vector3(218,0.4,-31)]:
+        var crystal := MeshInstance3D.new()
+        var mesh := PrismMesh.new()
+        mesh.size = Vector3(0.8,2.5,0.8)
+        crystal.mesh = mesh
+        crystal.position = crystal_pos
+        crystal.rotation_degrees = Vector3(0,randf_range(0,180),randf_range(-8,8))
+        var mat := _material(Color("4d8fac"),0.34)
+        mat.emission_enabled = true
+        mat.emission = Color("2b6e91")
+        mat.emission_energy_multiplier = 1.5
+        crystal.material_override = mat
+        mine_root.add_child(crystal)
+
+    for light_pos in [Vector3(205,4,20),Vector3(236,4,1),Vector3(213,4,-24)]:
+        var light := OmniLight3D.new()
+        light.position = light_pos
+        light.light_color = Color("ffb45f")
+        light.light_energy = 2.0
+        light.omni_range = 14.0
+        light.shadow_enabled = false
+        mine_root.add_child(light)
+
+    var exit_label := Label3D.new()
+    exit_label.text = "AUSGANG · RAVENFALL"
+    exit_label.position = MINE_EXIT + Vector3(0,3.0,-1.0)
+    exit_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+    exit_label.font_size = 26
+    exit_label.outline_size = 7
+    exit_label.modulate = Color("f0d18a")
+    add_child(exit_label)
+
+    var boss_label := Label3D.new()
+    boss_label.text = "KRISTALLKAMMER"
+    boss_label.position = Vector3(220,4.5,-32)
+    boss_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+    boss_label.font_size = 28
+    boss_label.outline_size = 8
+    boss_label.modulate = Color("8ed8ff")
+    add_child(boss_label)
+
+func _make_static_block(pos: Vector3, size_value: Vector3, color: Color) -> void:
+    var body := StaticBody3D.new()
+    body.position = pos
+    add_child(body)
+    _add_box_mesh(body,size_value,Vector3.ZERO,color,0.98)
+    var collision := CollisionShape3D.new()
+    var shape := BoxShape3D.new()
+    shape.size = size_value
+    collision.shape = shape
+    body.add_child(collision)
+
 func _make_tent(parent: Node3D, pos: Vector3, color: Color) -> void:
     var tent := MeshInstance3D.new()
     var prism := PrismMesh.new()
@@ -530,23 +616,45 @@ func _build_captain() -> void:
     captain.configure(player,self,captain.position)
     enemies.append(captain)
 
+func _build_mine_enemies() -> void:
+    var spider_spawns := [
+        Vector3(193,0.02,19),Vector3(204,0.02,8),Vector3(238,0.02,14),
+        Vector3(248,0.02,-2),Vector3(199,0.02,-15),Vector3(233,0.02,-18),Vector3(211,0.02,-25)
+    ]
+    for i in range(spider_spawns.size()):
+        var spider := CharacterBody3D.new()
+        spider.name = "CaveSpider_%d" % (i+1)
+        spider.position = spider_spawns[i]
+        spider.set_script(load("res://scripts/spider.gd"))
+        add_child(spider)
+        spider.configure(player,self,spider_spawns[i])
+        spiders.append(spider)
+        enemies.append(spider)
+
+    mine_boss = CharacterBody3D.new()
+    mine_boss.name = "Kristallwaechter"
+    mine_boss.position = Vector3(220,0.02,-30)
+    mine_boss.set_script(load("res://scripts/mine_boss.gd"))
+    add_child(mine_boss)
+    mine_boss.configure(player,self,mine_boss.position)
+    enemies.append(mine_boss)
+
 func _build_hud() -> void:
     var canvas := CanvasLayer.new()
     canvas.name = "HUD"
-    canvas.layer = 5
+    canvas.layer = 20
     add_child(canvas)
     hud = Control.new()
     hud.name = "HUDRoot"
     hud.set_script(load("res://scripts/hud.gd"))
-    canvas.add_child(hud)
-    hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    hud.position = Vector2.ZERO
+    hud.size = get_viewport().get_visible_rect().size
     hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
     hud.visible = true
     hud.process_mode = Node.PROCESS_MODE_ALWAYS
     hud.set("player", player)
     hud.set("game", self)
-    if hud.has_method("queue_redraw"):
-        hud.queue_redraw()
+    canvas.add_child(hud)
 
 func try_select_from_screen(camera: Camera3D, screen_pos: Vector2) -> bool:
     if camera == null:
@@ -575,12 +683,12 @@ func select_target(target: Node) -> void:
 func perform_player_attack() -> void:
     if not _can_attack() or attack_cooldown > 0.0:
         return
-    var target := _get_attack_target(7.0)
+    var target := _get_attack_target(7.5)
     if target == null:
         show_toast("Kein Gegner in Reichweite", 1.2)
         return
-    if player.global_position.distance_to(target.global_position) > 5.2:
-        var closer := _nearest_alive_enemy(5.2)
+    if player.global_position.distance_to(target.global_position) > 5.8:
+        var closer := _nearest_alive_enemy(5.8)
         if closer != null:
             target = closer
             select_target(target)
@@ -639,6 +747,25 @@ func perform_skill_2() -> void:
     else:
         show_toast("WIRBELWIND", 0.7)
 
+func use_potion() -> void:
+    if player == null or player.dead or quest_panel_open or inventory_open:
+        return
+    if potion_cd > 0.0:
+        show_toast("Heiltrank bereit in %.1fs" % potion_cd,1.0)
+        return
+    if potions <= 0:
+        show_toast("Keine Heiltränke mehr",1.2)
+        return
+    if player.health >= player.max_health:
+        show_toast("Lebenspunkte bereits voll",1.0)
+        return
+    var heal_amount := maxi(25,int(round(float(player.max_health)*0.45)))
+    player.heal(heal_amount)
+    potions -= 1
+    potion_cd = 14.0
+    show_toast("Heiltrank · +%d LP" % heal_amount,1.4)
+    save_game()
+
 func _can_attack() -> bool:
     return player != null and not player.dead and not quest_panel_open and not inventory_open
 
@@ -664,10 +791,27 @@ func _nearest_alive_enemy(max_distance: float) -> Node:
     return best
 
 func try_interact() -> void:
-    if quest_npc == null or player == null:
+    if player == null:
         return
-    if player.global_position.distance_to(quest_npc.global_position) > 3.7:
-        show_toast("Niemand zum Ansprechen in der Nähe", 1.2)
+    if player.global_position.distance_to(MINE_EXIT) <= 5.0:
+        player.global_position = SURFACE_MINE_ENTRANCE + Vector3(0,0.05,6.0)
+        player.cancel_touches()
+        select_target(null)
+        show_toast("Ravenfall · Alte Mine verlassen",2.0)
+        save_game()
+        return
+    if player.global_position.distance_to(SURFACE_MINE_ENTRANCE) <= 5.5:
+        if quest_id < QUEST_MINE_SPIDERS:
+            show_toast("Die Alte Mine ist noch versiegelt",1.6)
+            return
+        player.global_position = MINE_EXIT + Vector3(0,0.05,-5.0)
+        player.cancel_touches()
+        select_target(null)
+        show_toast("ALTE MINE · Kapitel II",2.2)
+        save_game()
+        return
+    if quest_npc == null or player.global_position.distance_to(quest_npc.global_position) > 3.7:
+        show_toast("Nichts zum Interagieren in der Nähe",1.2)
         return
     quest_panel_open = true
     inventory_open = false
@@ -675,6 +819,52 @@ func try_interact() -> void:
 
 func is_player_near_npc() -> bool:
     return player != null and quest_npc != null and player.global_position.distance_to(quest_npc.global_position) <= 3.7
+
+func is_interaction_available() -> bool:
+    if player == null:
+        return false
+    if is_player_near_npc():
+        return true
+    if player.global_position.distance_to(MINE_EXIT) <= 5.0:
+        return true
+    if player.global_position.distance_to(SURFACE_MINE_ENTRANCE) <= 5.5:
+        return true
+    return false
+
+func get_interact_label() -> String:
+    if player == null:
+        return "REDEN"
+    if player.global_position.distance_to(MINE_EXIT) <= 5.0:
+        return "RAUS"
+    if player.global_position.distance_to(SURFACE_MINE_ENTRANCE) <= 5.5:
+        return "MINE"
+    return "REDEN"
+
+func get_current_zone_name() -> String:
+    if player != null and player.global_position.x > 150.0:
+        return "Alte Mine"
+    return "Ravenfall"
+
+func get_objective_distance_text() -> String:
+    if player == null:
+        return ""
+    var target_pos := quest_npc.global_position if quest_npc != null else Vector3.ZERO
+    if quest_stage == 1 and quest_id in [QUEST_WOLVES,QUEST_BANDITS,QUEST_CAPTAIN]:
+        if quest_id == QUEST_WOLVES:
+            target_pos = Vector3(5,0,-45)
+        elif quest_id == QUEST_BANDITS:
+            target_pos = Vector3(18,0,-80)
+        else:
+            target_pos = Vector3(19,0,-91)
+    elif quest_stage == 1 and quest_id in [QUEST_MINE_SPIDERS,QUEST_MINE_BOSS]:
+        if player.global_position.x < 150.0:
+            target_pos = SURFACE_MINE_ENTRANCE
+        elif quest_id == QUEST_MINE_SPIDERS:
+            target_pos = Vector3(220,0,-8)
+        else:
+            target_pos = Vector3(220,0,-30)
+    var d := int(round(player.global_position.distance_to(target_pos)))
+    return "%dm" % d
 
 func toggle_inventory() -> void:
     inventory_open = not inventory_open
@@ -706,30 +896,41 @@ func _turn_in_current_quest() -> void:
         _add_xp(55)
         add_item({"name":"Eisenklinge von Ravenfall", "power":4, "rarity":"Ungewöhnlich", "type":"Waffe"}, true)
         quest_id = QUEST_BANDITS
-        quest_stage = 0
-        quest_progress = 0
-        quest_panel_open = false
-        save_game()
-        show_toast("Auftrag erfüllt · neuer Auftrag verfügbar", 2.8)
     elif quest_id == QUEST_BANDITS:
         gold += 55
         _add_xp(90)
         add_item({"name":"Wächterklinge", "power":8, "rarity":"Selten", "type":"Waffe"}, true)
         quest_id = QUEST_CAPTAIN
-        quest_stage = 0
-        quest_progress = 0
-        quest_panel_open = false
-        save_game()
-        show_toast("Das Lager fällt · Arlen hat noch einen Auftrag", 2.8)
     elif quest_id == QUEST_CAPTAIN:
         gold += 95
         _add_xp(145)
         add_item({"name":"Klinge des Grenzwächters", "power":13, "rarity":"Episch", "type":"Waffe"}, true)
+        potions += 2
+        quest_id = QUEST_MINE_SPIDERS
+        show_toast("KAPITEL II FREIGESCHALTET · Die Alte Mine",3.0)
+    elif quest_id == QUEST_MINE_SPIDERS:
+        gold += 120
+        _add_xp(180)
+        add_item({"name":"Minenwächter-Brustpanzer", "armor":6, "rarity":"Selten", "type":"Rüstung"}, true)
+        potions += 2
+        quest_id = QUEST_MINE_BOSS
+    elif quest_id == QUEST_MINE_BOSS:
+        gold += 220
+        _add_xp(300)
+        add_item({"name":"Kristallherz von Eldoria", "power":6, "rarity":"Episch", "type":"Schmuck"}, true)
+        add_item({"name":"Kristallschneide", "power":19, "rarity":"Episch", "type":"Waffe"}, true)
         quest_id = QUEST_DONE
         quest_stage = 3
+        quest_progress = 0
         quest_panel_open = false
         save_game()
-        show_toast("KAPITEL I ABGESCHLOSSEN · Ravenfall ist sicher", 3.3)
+        show_toast("KAPITEL II ABGESCHLOSSEN · Die Mine ist gereinigt",3.4)
+        return
+    quest_stage = 0
+    quest_progress = 0
+    quest_panel_open = false
+    save_game()
+    show_toast("Auftrag erfüllt · neuer Auftrag verfügbar",2.6)
 
 func get_quest_panel_rect() -> Rect2:
     var screen := get_viewport().get_visible_rect().size
@@ -781,110 +982,124 @@ func get_quest_button_text() -> String:
     return "SCHLIESSEN"
 
 func get_quest_title() -> String:
-    if quest_id == QUEST_WOLVES:
-        return "Wölfe vor den Toren"
-    if quest_id == QUEST_BANDITS:
-        return "Die Räuber vom Ostlager"
-    if quest_id == QUEST_CAPTAIN:
-        return "Der Hauptmann der Räuber"
-    return "Ravenfall gesichert"
+    match quest_id:
+        QUEST_WOLVES: return "Wölfe vor den Toren"
+        QUEST_BANDITS: return "Die Räuber vom Ostlager"
+        QUEST_CAPTAIN: return "Der Hauptmann der Räuber"
+        QUEST_MINE_SPIDERS: return "Unter Ravenfall"
+        QUEST_MINE_BOSS: return "Das Herz der Mine"
+        _: return "Ravenfall gesichert"
 
 func get_quest_body_lines() -> PackedStringArray:
     if quest_id == QUEST_WOLVES:
-        if quest_stage == 0:
-            return PackedStringArray(["Hauptmann Arlen: Die Wölfe werden dreister.","Besiege 3 Wölfe südlich des Tores.","Belohnung: 55 EP, 28 Gold und eine neue Klinge."])
-        if quest_stage == 1:
-            return PackedStringArray(["Halte die Straße nach Süden frei.","Fortschritt: %d / 3 Wölfe" % quest_progress,"Kehre danach zu mir zurück."])
-        return PackedStringArray(["Hauptmann Arlen: Gute Arbeit.","Die Straße ist wieder passierbar.","Deine Belohnung wartet."])
+        if quest_stage == 0: return PackedStringArray(["Hauptmann Arlen: Die Wölfe werden dreister.","Besiege 3 Wölfe südlich des Tores.","Belohnung: 55 EP, 28 Gold und eine neue Klinge."])
+        if quest_stage == 1: return PackedStringArray(["Halte die Straße nach Süden frei.","Fortschritt: %d / 3 Wölfe" % quest_progress,"Kehre danach zu mir zurück."])
+        return PackedStringArray(["Gute Arbeit. Die Straße ist wieder passierbar.","Deine Belohnung wartet."])
     if quest_id == QUEST_BANDITS:
-        if quest_stage == 0:
-            return PackedStringArray(["Arlen: Hinter den Wölfen stecken Räuber.","Besiege 4 Banditen am Lager vor der Alten Mine.","Belohnung: 90 EP, 55 Gold und eine seltene Waffe."])
-        if quest_stage == 1:
-            return PackedStringArray(["Folge der Straße weiter nach Süden und Osten.","Fortschritt: %d / 4 Banditen" % quest_progress,"Das Lager liegt gegenüber der Alten Mine."])
-        return PackedStringArray(["Arlen: Das Lager ist gefallen.","Ihr Anführer hält sich hinter den Zelten auf.","Wir müssen ihn ausschalten."])
+        if quest_stage == 0: return PackedStringArray(["Hinter den Wölfen stecken Räuber.","Besiege 4 Banditen am Lager vor der Alten Mine.","Belohnung: 90 EP, 55 Gold und eine seltene Waffe."])
+        if quest_stage == 1: return PackedStringArray(["Folge der Straße zum Ostlager.","Fortschritt: %d / 4 Banditen" % quest_progress,"Zerschlage das Lager."])
+        return PackedStringArray(["Das Lager fällt. Ihr Hauptmann steht noch.","Hol dir deine Belohnung."])
     if quest_id == QUEST_CAPTAIN:
-        if quest_stage == 0:
-            return PackedStringArray(["Arlen: Jetzt fehlt nur noch ihr Hauptmann.","Besiege den Banditenhauptmann hinter dem Ostlager.","Belohnung: 145 EP, 95 Gold und eine epische Klinge."])
-        if quest_stage == 1:
-            return PackedStringArray(["Der Hauptmann steht südlich hinter dem Lager.","Elitegegner: 0 / 1 besiegt","Bereite dich auf einen härteren Kampf vor."])
-        return PackedStringArray(["Arlen: Der Hauptmann ist gefallen.","Ravenfall ist vorerst sicher.","Kapitel I ist abgeschlossen."])
-    return PackedStringArray(["Arlen: Ravenfall steht wieder sicher.","Die Alte Mine bleibt vorerst versiegelt.","Kapitel II führt uns unter die Erde."])
+        if quest_stage == 0: return PackedStringArray(["Jetzt fehlt nur noch ihr Hauptmann.","Besiege den Banditenhauptmann hinter dem Ostlager.","Danach öffnen wir die Alte Mine."])
+        if quest_stage == 1: return PackedStringArray(["Elitegegner im Süden des Lagers.","Banditenhauptmann: %d / 1" % quest_progress,"Bereite dich auf einen härteren Kampf vor."])
+        return PackedStringArray(["Der Hauptmann ist gefallen.","Doch unter uns bewegt sich etwas.","Kapitel II wartet in der Alten Mine."])
+    if quest_id == QUEST_MINE_SPIDERS:
+        if quest_stage == 0: return PackedStringArray(["Arlen: Die Mine ist wieder offen.","Betritt die Alte Mine und besiege 5 Höhlenspinnen.","Tipp: Am Eingang erscheint MINE, wenn du nah genug bist."])
+        if quest_stage == 1: return PackedStringArray(["Durchsuche die Alte Mine.","Höhlenspinnen: %d / 5" % quest_progress,"Verlasse die Mine danach über den Ausgang."])
+        return PackedStringArray(["Die Nester sind zerstört.","Arlen will wissen, was tiefer in der Mine lauert."])
+    if quest_id == QUEST_MINE_BOSS:
+        if quest_stage == 0: return PackedStringArray(["Arlen: Ein Kristallwächter blockiert die tiefste Kammer.","Betritt die Mine und besiege den Kristallwächter.","Belohnung: epische Ausrüstung und viel Erfahrung."])
+        if quest_stage == 1: return PackedStringArray(["Der Wächter wartet in der Kristallkammer.","Kristallwächter: %d / 1" % quest_progress,"Nutze Heiltränke im Kampf."])
+        return PackedStringArray(["Der Kristallwächter ist gefallen.","Die Alte Mine ist wieder sicher.","Kapitel II ist abgeschlossen."])
+    return PackedStringArray(["Ravenfall und die Alte Mine sind gesichert.","Weitere Gebiete folgen im nächsten Kapitel."])
 
 func get_quest_tracker_text() -> String:
     if quest_id == QUEST_DONE:
-        return "Kapitel I abgeschlossen"
+        return "Kapitel II abgeschlossen"
     if quest_stage == 0:
         return "Sprich mit Hauptmann Arlen"
     if quest_stage == 2:
         return "Kehre zu Hauptmann Arlen zurück"
-    if quest_id == QUEST_WOLVES:
-        return "Wölfe besiegen: %d / 3" % quest_progress
-    if quest_id == QUEST_BANDITS:
-        return "Banditen besiegen: %d / 4" % quest_progress
-    return "Banditenhauptmann besiegen: %d / 1" % quest_progress
+    match quest_id:
+        QUEST_WOLVES: return "Wölfe besiegen: %d / 3" % quest_progress
+        QUEST_BANDITS: return "Banditen besiegen: %d / 4" % quest_progress
+        QUEST_CAPTAIN: return "Banditenhauptmann: %d / 1" % quest_progress
+        QUEST_MINE_SPIDERS: return "Höhlenspinnen: %d / 5" % quest_progress
+        QUEST_MINE_BOSS: return "Kristallwächter: %d / 1" % quest_progress
+    return "Abenteuer fortsetzen"
 
 func on_enemy_defeated(enemy: Node, enemy_type: String) -> void:
     if current_target == enemy:
         select_target(null)
     if enemy_type == "wolf":
-        var loot_gold := randi_range(3,8)
-        gold += loot_gold
-        pelts += 1
-        _add_xp(20)
-        if randf() < 0.16:
-            add_item({"name":"Wolfszahn-Anhänger", "power":1, "rarity":"Ungewöhnlich", "type":"Schmuck"}, false)
+        var loot_gold := randi_range(3,8); gold += loot_gold; pelts += 1; _add_xp(20)
+        if randf() < 0.10: potions += 1
+        if randf() < 0.16: add_item({"name":"Wolfszahn-Anhänger", "power":1, "rarity":"Ungewöhnlich", "type":"Schmuck"}, false)
         if quest_id == QUEST_WOLVES and quest_stage == 1:
-            quest_progress = mini(3, quest_progress + 1)
-            if quest_progress >= 3:
-                quest_stage = 2
-                show_toast("Questziel erreicht · zurück zu Arlen", 2.5)
-                return
+            quest_progress = mini(3,quest_progress+1)
+            if quest_progress >= 3: quest_stage=2; show_toast("Questziel erreicht · zurück zu Arlen",2.5)
         show_loot("+20 EP · +%d Gold · Wolfspelz" % loot_gold)
     elif enemy_type == "bandit":
-        var loot_gold := randi_range(7,14)
-        gold += loot_gold
-        _add_xp(32)
-        if randf() < 0.22:
-            add_item({"name":"Banditenring", "power":2, "rarity":"Ungewöhnlich", "type":"Schmuck"}, false)
+        var loot_gold := randi_range(7,14); gold += loot_gold; _add_xp(32)
+        if randf() < 0.14: potions += 1
+        if randf() < 0.22: add_item({"name":"Banditenring", "power":2, "rarity":"Ungewöhnlich", "type":"Schmuck"}, false)
         if quest_id == QUEST_BANDITS and quest_stage == 1:
-            quest_progress = mini(4, quest_progress + 1)
-            if quest_progress >= 4:
-                quest_stage = 2
-                show_toast("Banditenlager gebrochen · zurück zu Arlen", 2.7)
-                return
+            quest_progress = mini(4,quest_progress+1)
+            if quest_progress >= 4: quest_stage=2; show_toast("Banditenlager gebrochen · zurück zu Arlen",2.7)
         show_loot("+32 EP · +%d Gold · Beute" % loot_gold)
-
     elif enemy_type == "captain":
-        var loot_gold := randi_range(18,28)
-        gold += loot_gold
-        _add_xp(65)
+        var loot_gold := randi_range(18,28); gold += loot_gold; _add_xp(65); potions += 1
         add_item({"name":"Siegelring des Hauptmanns", "power":3, "rarity":"Selten", "type":"Schmuck"}, false)
-        if quest_id == QUEST_CAPTAIN and quest_stage == 1:
-            quest_progress = 1
-            quest_stage = 2
-            show_toast("ELITE BESIEGT · zurück zu Arlen", 2.8)
+        if quest_id == QUEST_CAPTAIN and quest_stage == 1: quest_progress=1; quest_stage=2; show_toast("ELITE BESIEGT · zurück zu Arlen",2.8)
         show_loot("+65 EP · +%d Gold · Elitebeute" % loot_gold)
-        save_game()
+    elif enemy_type == "spider":
+        var loot_gold := randi_range(8,16); gold += loot_gold; _add_xp(42)
+        if randf() < 0.24: potions += 1
+        if randf() < 0.18: add_item({"name":"Chitinpanzer", "armor":3, "rarity":"Ungewöhnlich", "type":"Rüstung"}, false)
+        if quest_id == QUEST_MINE_SPIDERS and quest_stage == 1:
+            quest_progress = mini(5,quest_progress+1)
+            if quest_progress >= 5: quest_stage=2; show_toast("Spinnennester zerstört · zurück zu Arlen",2.8)
+        show_loot("+42 EP · +%d Gold · Chitin" % loot_gold)
+    elif enemy_type == "mine_boss":
+        var loot_gold := randi_range(45,70); gold += loot_gold; _add_xp(120); potions += 2
+        add_item({"name":"Kristallsplitter-Talisman", "power":4, "rarity":"Selten", "type":"Schmuck"}, true)
+        if quest_id == QUEST_MINE_BOSS and quest_stage == 1: quest_progress=1; quest_stage=2; show_toast("BOSS BESIEGT · zurück zu Arlen",3.0)
+        show_loot("+120 EP · +%d Gold · Bossbeute" % loot_gold)
+    save_game()
 
 func add_item(item: Dictionary, auto_equip: bool = false) -> void:
     inventory.append(item.duplicate(true))
     loot_text = "%s gefunden" % item.get("name","Gegenstand")
     loot_time = 2.2
-    if auto_equip and item.get("type","") == "Waffe":
-        if int(item.get("power",0)) > int(equipped_weapon.get("power",0)):
-            equipped_weapon = item.duplicate(true)
-            show_toast("Ausgerüstet: %s" % equipped_weapon.get("name","Waffe"), 2.0)
+    if auto_equip:
+        _equip_if_better(item)
+
+func _equip_if_better(item: Dictionary) -> void:
+    var item_type := String(item.get("type",""))
+    if item_type == "Waffe" and int(item.get("power",0)) > int(equipped_weapon.get("power",0)):
+        equipped_weapon = item.duplicate(true)
+        show_toast("Neue Waffe: %s" % equipped_weapon.get("name","Waffe"),1.8)
+    elif item_type == "Rüstung" and int(item.get("armor",0)) > int(equipped_armor.get("armor",0)):
+        equipped_armor = item.duplicate(true)
+        show_toast("Neue Rüstung: %s" % equipped_armor.get("name","Rüstung"),1.8)
+    elif item_type == "Schmuck" and int(item.get("power",0)) > int(equipped_charm.get("power",0)):
+        equipped_charm = item.duplicate(true)
+        show_toast("Neuer Talisman: %s" % equipped_charm.get("name","Schmuck"),1.8)
 
 func auto_equip_best_weapon() -> void:
-    var best := equipped_weapon
+    auto_equip_best_gear()
+
+func auto_equip_best_gear() -> void:
     for item in inventory:
-        if item.get("type","") == "Waffe" and int(item.get("power",0)) > int(best.get("power",0)):
-            best = item
-    equipped_weapon = best.duplicate(true)
-    show_toast("Beste Waffe: %s (+%d)" % [equipped_weapon.get("name","Waffe"), get_weapon_power()], 1.8)
+        _equip_if_better(item)
+    show_toast("Beste Ausrüstung angelegt",1.5)
+    save_game()
 
 func get_weapon_power() -> int:
-    return int(equipped_weapon.get("power",0))
+    return int(equipped_weapon.get("power",0)) + int(equipped_charm.get("power",0))
+
+func get_armor_value() -> int:
+    return int(equipped_armor.get("armor",0))
 
 func _add_xp(amount: int) -> void:
     xp += amount
@@ -928,47 +1143,49 @@ func save_game() -> void:
     if player == null:
         return
     var data := {
-        "version":4,
-        "level":level,"xp":xp,"gold":gold,"pelts":pelts,"rage":rage,
+        "version":5,
+        "level":level,"xp":xp,"gold":gold,"pelts":pelts,"rage":rage,"potions":potions,
         "quest_id":quest_id,"quest_stage":quest_stage,"quest_progress":quest_progress,
-        "inventory":inventory,"equipped_weapon":equipped_weapon,
+        "inventory":inventory,"equipped_weapon":equipped_weapon,"equipped_armor":equipped_armor,"equipped_charm":equipped_charm,
         "player_pos":[player.global_position.x,player.global_position.y,player.global_position.z]
     }
-    var file := FileAccess.open("user://eldoria_save_v04.json",FileAccess.WRITE)
+    var file := FileAccess.open("user://eldoria_save_v05.json",FileAccess.WRITE)
     if file != null:
         file.store_string(JSON.stringify(data))
 
 func _load_game() -> void:
-    if not FileAccess.file_exists("user://eldoria_save_v04.json"):
-        return
-    var file := FileAccess.open("user://eldoria_save_v04.json",FileAccess.READ)
+    var save_path := "user://eldoria_save_v05.json"
+    if not FileAccess.file_exists(save_path):
+        if FileAccess.file_exists("user://eldoria_save_v04.json"):
+            save_path = "user://eldoria_save_v04.json"
+        else:
+            return
+    var file := FileAccess.open(save_path,FileAccess.READ)
     if file == null:
         return
     var parsed = JSON.parse_string(file.get_as_text())
     if typeof(parsed) != TYPE_DICTIONARY:
         return
-    level = int(parsed.get("level",1))
-    xp = int(parsed.get("xp",0))
-    gold = int(parsed.get("gold",0))
-    pelts = int(parsed.get("pelts",0))
-    rage = int(parsed.get("rage",0))
-    quest_id = int(parsed.get("quest_id",QUEST_WOLVES))
-    quest_stage = int(parsed.get("quest_stage",0))
-    quest_progress = int(parsed.get("quest_progress",0))
-    var inv = parsed.get("inventory",[])
-    inventory.clear()
+    var save_version := int(parsed.get("version",4))
+    level = int(parsed.get("level",1)); xp = int(parsed.get("xp",0)); gold = int(parsed.get("gold",0)); pelts = int(parsed.get("pelts",0)); rage = int(parsed.get("rage",0)); potions = int(parsed.get("potions",3))
+    quest_id = int(parsed.get("quest_id",QUEST_WOLVES)); quest_stage = int(parsed.get("quest_stage",0)); quest_progress = int(parsed.get("quest_progress",0))
+    if save_version < 5 and quest_id == 3 and quest_stage == 3:
+        quest_id = QUEST_MINE_SPIDERS; quest_stage = 0; quest_progress = 0
+    var inv = parsed.get("inventory",[]); inventory.clear()
     if inv is Array:
         for entry in inv:
-            if entry is Dictionary:
-                inventory.append(entry)
+            if entry is Dictionary: inventory.append(entry)
     var weapon = parsed.get("equipped_weapon",equipped_weapon)
-    if weapon is Dictionary:
-        equipped_weapon = weapon
+    if weapon is Dictionary: equipped_weapon = weapon
+    var armor = parsed.get("equipped_armor",equipped_armor)
+    if armor is Dictionary: equipped_armor = armor
+    var charm = parsed.get("equipped_charm",equipped_charm)
+    if charm is Dictionary: equipped_charm = charm
     player.set_max_health(100 + (level - 1) * 14,true)
     var pos = parsed.get("player_pos",[])
     if pos is Array and pos.size() == 3:
         var saved_pos := Vector3(float(pos[0]),float(pos[1]),float(pos[2]))
-        if saved_pos.length() < 180.0:
+        if saved_pos.length() < 360.0:
             player.global_position = saved_pos
     _update_quest_marker()
 
